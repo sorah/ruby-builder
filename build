@@ -1,0 +1,165 @@
+#!/usr/bin/ruby2.0
+require 'json'
+require 'optparse'
+require 'fileutils'
+
+options = {
+  source: 'https://github.com/ruby/ruby',
+  ref: nil,
+  branch: 'trunk',
+  name: nil,
+  prefix: '/usr/share/rbenv/versions',
+  repo_dir: '/tmp/ruby',
+  build_dir: '/tmp/build',
+  target: '/tmp/out',
+  configure: [],
+  scratch_configure: false,
+  jobs: `nproc`.to_i.succ,
+}
+
+parser = OptionParser.new do |opt|
+  opt.on('--source REPO_URL', 'source git repository') do |url|
+    options[:source] = url
+  end
+
+  opt.on('--branch BRANCH_OR_TAG', 'branch or tag to build') do |ref|
+    options[:branch] = ref
+  end
+
+  opt.on('--ref COMMIT_REF', 'commit ref to build') do |ref|
+    options[:ref] = ref
+  end
+
+  opt.on('--prefix PREFIX', 'prefix (default=/usr/share/rbenv/versions)') do |ref|
+    options[:ref] = ref
+  end
+
+  opt.on('--name NAME', 'build name (default=trunk)') do |name|
+    options[:name] = name
+  end
+
+  opt.on('--scratch-configure', 'do not use default configure options') do |o|
+    options[:scratch_configure] = true
+  end
+
+  opt.on('--configure CONFIGURE_OPT', '-c CONFIGURE_OPT', 'add configure opt') do |o|
+    options[:configure] << o
+  end
+
+  opt.on('--jobs NUM', '-j NUM') do |j|
+    options[:jobs] = j.to_i
+  end
+
+  opt.on('--test-all', 'run test-all') do
+    options[:test_all] = true
+  end
+
+  opt.on('--enforce-test-result', 'fail when test failed') do
+    options[:enforce_test_result] = true
+  end
+
+end
+
+args = parser.parse(ARGV)
+
+unless options[:scratch_configure]
+  options[:configure].unshift(
+    '--enable-shared',
+    '--enable-vagrant',
+    '--without-install-doc',
+    '--without-install-capi',
+  )
+end
+
+name = options[:name] || options[:ref].gsub(%r{[:/]},'__')
+prefix = File.join(options[:prefix], name)
+tarball = File.join(options[:target], "#{name}.tar.xz")
+receipt = File.join(options[:target], "#{name}.json")
+log = File.join(options[:target], "#{name}.log")
+
+@log_io = open(log, 'w')
+def log(*args)
+  $stdout.puts *args
+  @log_io.puts *args
+end
+
+plan = {
+  name: name,
+  prefix: prefix,
+  tarball: tarball,
+  receipt: receipt,
+  log: log,
+  options: options,
+}
+
+log "===> Plan\n\n#{plan.to_json}\n\n"
+
+FileUtils.mkdir_p options[:prefix]
+FileUtils.mkdir_p options[:target]
+FileUtils.mkdir_p options[:target]
+FileUtils.mkdir_p options[:build_dir]
+
+def cmd(*args)
+  cmd_allow_failure(*args).tap do |status|
+    unless status.success?
+      raise 'execution failed'
+    end
+  end
+end
+
+def cmd_allow_failure(*args)
+  log "==> #{args.inspect}"
+
+  pid, status = IO.popen([*args, err: [:child, :out]], 'r') do |io|
+    while line = io.gets
+      log line
+    end
+
+    Process.waitpid2(io.pid)
+  end
+
+  status
+end
+
+
+cmd *%W(git clone --depth 1 #{options[:source]} #{options[:repo_dir]})
+Dir.chdir options[:repo_dir]
+
+case
+when options[:ref]
+  cmd *%W(git fetch origin #{options[:ref]})
+  cmd *%W(git checkout FETCH_HEAD)
+when options[:branch]
+  cmd *%W(git fetch --depth 1 origin #{options[:branch]})
+  cmd *%W(git checkout -b #{options[:branch]} #{options[:branch]})
+end
+
+cmd *%W(autoconf)
+
+Dir.chdir options[:build_dir]
+
+cmd File.join(options[:repo_dir], 'configure'), "--prefix=#{prefix}", *options[:configure]
+
+cmd 'make', '-j', options[:jobs].to_s
+cmd 'make', 'install'
+cmd 'make', 'test'
+
+if options[:test_all]
+  test_result = cmd_allow_failure('make', "TESTS='-v -j #{options[:jobs]}'", 'test-all').success?
+
+  if options[:enforce_test_result] && !test_result
+    raise 'test failed'
+  end
+else
+  test_result = nil
+end
+
+cmd *%W(tar cJf #{tarball} -C #{options[:prefix]} #{name})
+
+ref = IO.popen([*%w(git rev-parse HEAD), chdir: options[:repo_dir]], 'r', &:read).chomp
+commit = IO.popen([*%w(git show --no-patch --stat), chdir: options[:repo_dir]], 'r', &:read).chomp
+ruby_v = IO.popen([File.join(prefix, 'bin', 'ruby'), '-v'], 'r', &:read).chomp
+
+receipt_json = plan.merge(ref: ref, commit_log: commit, test_result: test_result).to_json
+log "==> Receipt:\n\n#{receipt_json}"
+File.write receipt, receipt_json
