@@ -67,7 +67,7 @@ unless options[:scratch_configure]
     '--enable-shared',
     '--enable-vagrant',
     '--disable-install-doc',
-    '--dissble-install-capi',
+    '--disable-install-capi',
   )
 end
 
