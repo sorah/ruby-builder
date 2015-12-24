@@ -66,8 +66,8 @@ unless options[:scratch_configure]
   options[:configure].unshift(
     '--enable-shared',
     '--enable-vagrant',
-    '--without-install-doc',
-    '--without-install-capi',
+    '--disable-install-doc',
+    '--dissble-install-capi',
   )
 end
 
