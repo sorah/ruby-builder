@@ -1,0 +1,11 @@
+FROM ubuntu:16.04
+
+RUN apt-get update && apt-get build-dep -y ruby2.3 && apt-get install -y ruby git-core automake autoconf
+RUN mkdir -p /usr/local/bin
+
+ADD setup-rbenv /usr/local/bin/setup-rbenv
+RUN /usr/local/bin/setup-rbenv
+
+ADD build /usr/local/bin/build
+
+ENTRYPOINT ["build"]
