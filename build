@@ -141,6 +141,7 @@ Dir.chdir options[:build_dir]
 cmd File.join(options[:repo_dir], 'configure'), "--prefix=#{prefix}", *options[:configure]
 
 cmd 'make', '-j', options[:jobs].to_s
+cmd 'make', 'extract-gems'
 cmd 'make', 'install'
 cmd 'make', 'test'
 
