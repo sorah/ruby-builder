@@ -131,7 +131,7 @@ when options[:ref]
   cmd *%W(git checkout FETCH_HEAD)
 when options[:branch] && options[:branch] != `git symbolic-ref --short HEAD`.chomp
   cmd *%W(git fetch --depth 1 origin #{options[:branch]})
-  cmd *%W(git checkout -b #{options[:branch]} #{options[:branch]})
+  cmd *%W(git checkout -b #{options[:branch]} FETCH_HEAD)
 end
 
 cmd *%W(autoconf)
